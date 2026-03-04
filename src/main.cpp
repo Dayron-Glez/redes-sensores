@@ -1,11 +1,11 @@
-
 #include "Arduino.h"
 #include "heltec.h"
 
-#define BOTON 0 // Boton PRG de la placa (GPIO0)
+#define BOTON 0
+#define MI_LED 2
 
 volatile bool botonPulsado = false;
-unsigned int contador = 0;
+bool ledEncendido = false;
 
 void IRAM_ATTR isrBoton()
 {
@@ -15,8 +15,9 @@ void IRAM_ATTR isrBoton()
 void setup()
 {
 	Heltec.begin(false, false, true, false);
-
 	pinMode(BOTON, INPUT_PULLUP);
+	pinMode(MI_LED, OUTPUT);
+	digitalWrite(MI_LED, LOW);
 	attachInterrupt(digitalPinToInterrupt(BOTON), isrBoton, FALLING);
 }
 
@@ -26,8 +27,9 @@ void loop()
 	{
 		delay(50);
 		botonPulsado = false;
-		contador++;
-		Serial.print("Boton pulsado! Pulsacion #");
-		Serial.println(contador);
+		ledEncendido = !ledEncendido;
+		digitalWrite(MI_LED, ledEncendido ? HIGH : LOW);
+		Serial.print("LED: ");
+		Serial.println(ledEncendido ? "ENCENDIDO" : "APAGADO");
 	}
 }
