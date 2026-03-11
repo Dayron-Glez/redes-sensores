@@ -3,6 +3,7 @@
 
 #define BAND (868E6)
 #define ORG (2)
+#define DESTINO_DEFECTO (5)
 #define LED (2)
 #define BOTON (0)
 #define TREBOTE (20)
@@ -12,10 +13,13 @@
 // Variables
 static bool teclaPulsada;
 static String rcvMsgRadio;
+static String rcvPayloadRadio;
 static unsigned long nextEventTemp;
 static bool termostatoEncendido = false;
 static bool calefaccionActiva = false;
 static float temperatura = 20.0;
+static int lastRadioOrigin = -1;
+static int lastRadioDestination = -1;
 
 #define TEMP_CONSIGNA 22.0
 #define HISTERESIS 1.0
@@ -23,6 +27,8 @@ static float temperatura = 20.0;
 #define TEMP_ALTA (TEMP_CONSIGNA + HISTERESIS)
 
 // --- Funciones auxiliares (del loopback) ---
+
+void actualizarDisplay();
 
 void printScreen(const String &msg, const int16_t &pos = 0)
 {
@@ -47,13 +53,46 @@ float getTemp(void)
 	return temperature;
 }
 
-void sendRadio(const String &message, const int destino = 1)
+void sendRadio(const String &message, const int destino = DESTINO_DEFECTO)
 {
+	String packet = String(destino) + String(ORG) + message;
+	Serial.println("Radio TX: " + packet);
 	LoRa.beginPacket();
 	LoRa.setTxPower(14, RF_PACONFIG_PASELECT_PABOOST);
-	LoRa.print(String(destino) + String(ORG) + message);
+	LoRa.print(packet);
 	LoRa.endPacket();
 	LoRa.receive();
+}
+
+void replyRadio(const String &message)
+{
+	if (lastRadioOrigin >= 0)
+	{
+		sendRadio(message, lastRadioOrigin);
+	}
+}
+
+void aplicarComandoRadio(const String &payload)
+{
+	bool comandoAplicado = false;
+
+	if (lastRadioOrigin == 2 && payload == "ENCENDER")
+	{
+		termostatoEncendido = true;
+		comandoAplicado = true;
+	}
+	else if (lastRadioOrigin == 2 && payload == "APAGADO")
+	{
+		termostatoEncendido = false;
+		calefaccionActiva = false;
+		digitalWrite(LED, LOW);
+		comandoAplicado = true;
+	}
+
+	if (comandoAplicado)
+	{
+		actualizarDisplay();
+	}
 }
 
 void onRadioMsg(int packetSize)
@@ -63,8 +102,24 @@ void onRadioMsg(int packetSize)
 	{
 		readMsg += (char)LoRa.read();
 	}
-	if (rcvMsgRadio.isEmpty())
-		rcvMsgRadio = readMsg;
+
+	if (readMsg.length() >= 2 && isDigit(readMsg[0]) && isDigit(readMsg[1]))
+	{
+		lastRadioDestination = readMsg.substring(0, 1).toInt();
+		lastRadioOrigin = readMsg.substring(1, 2).toInt();
+		rcvPayloadRadio = readMsg.substring(2);
+
+		if (lastRadioDestination == ORG && rcvMsgRadio.isEmpty())
+		{
+			rcvMsgRadio = readMsg;
+		}
+	}
+	else
+	{
+		lastRadioDestination = -1;
+		lastRadioOrigin = -1;
+		rcvPayloadRadio = "";
+	}
 }
 
 // --- Control del termostato (de la P1) ---
@@ -122,6 +177,7 @@ void setup()
 	LoRa.onReceive(onRadioMsg);
 	LoRa.receive();
 	rcvMsgRadio = "";
+	rcvPayloadRadio = "";
 
 	nextEventTemp = millis();
 	teclaPulsada = false;
@@ -134,15 +190,11 @@ void loop()
 	// Evento del boton (polling, como en el loopback)
 	if (!digitalRead(BOTON) && !teclaPulsada)
 	{
-		termostatoEncendido = !termostatoEncendido;
-		if (!termostatoEncendido)
-		{
-			calefaccionActiva = false;
-			digitalWrite(LED, LOW);
-		}
-		Serial.print("Termostato: ");
-		Serial.println(termostatoEncendido ? "ENCENDIDO" : "APAGADO");
-		actualizarDisplay();
+		sendRadio("ENCENDER");
+		Serial.print("Orden enviada a ");
+		Serial.print(DESTINO_DEFECTO);
+		Serial.print(": ");
+		Serial.println("ENCENDER");
 		teclaPulsada = true;
 		delay(TREBOTE);
 	}
@@ -171,7 +223,7 @@ void loop()
 		Serial.println();
 
 		// Enviar por radio
-		sendRadio("TEMP:" + String(temperatura, 1));
+		sendRadio("TEMP" + String(temperatura, 1));
 
 		// Actualizar display
 		actualizarDisplay();
@@ -179,11 +231,22 @@ void loop()
 		nextEventTemp += TIME_TEMP;
 	}
 
-	// Si hay mensaje de radio pendiente (para debug)
 	if (!rcvMsgRadio.isEmpty())
 	{
 		Serial.println("Radio RX: " + rcvMsgRadio);
+
+		if (lastRadioOrigin >= 0)
+		{
+			Serial.println("Payload RX: " + rcvPayloadRadio);
+			aplicarComandoRadio(rcvPayloadRadio);
+			if (!rcvPayloadRadio.startsWith("RECIBIDO"))
+			{
+				replyRadio("RECIBIDO" + rcvPayloadRadio);
+			}
+		}
+
 		rcvMsgRadio = "";
+		rcvPayloadRadio = "";
 	}
 
 	delay(TDELAY);
