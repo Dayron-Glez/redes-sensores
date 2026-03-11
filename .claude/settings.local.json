@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.fumadocs.dev)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:www.danielfullstack.com)",
+      "WebFetch(domain:next.jqueryscript.net)"
+    ]
+  }
+}
